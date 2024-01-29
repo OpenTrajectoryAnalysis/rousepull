@@ -1,4 +1,5 @@
 ipykernel
 nbsphinx
+sphinx-rtd-theme
 matplotlib
 numpy
