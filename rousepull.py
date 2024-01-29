@@ -31,14 +31,16 @@ class ForceInference:
     tR : Rouse time of a finite tether on one side. If ``None`` (default), both
         tethers will be infinite. Mathematically this of course simply means
         ``tR = inf``. So far, a finite tether is implemented only for ``alpha =
-        0.5``.
+        0.5``. Set tR < 0 to add make the tethers on both sides finite (with
+        Rouse time -tR).
     alpha : float in (0, 1)
         Scaling exponent of the MSD, i.e. this controls viscoelasticity of
         the medium. So far this is implemented by tweaking the formulas, so no
         guarantees on correctness for any alpha != 0.5.  That being said,
         doesn't look too bad.
-    s : float
-        relative shift of the force switches (see Notes).
+    shift : float
+        relative shift of the force switches (see Notes). Default value is
+        ``shift = 1.``.
 
     Attributes
     ----------
@@ -85,7 +87,7 @@ class ForceInference:
 
     See also the Quickstart example for an illustration with (dummy) data.
     """
-    def __init__(self, t, x=None, Gamma=None, tR=None, alpha=0.5, shift=1):
+    def __init__(self, t, x=None, Gamma=None, tR=None, alpha=0.5, shift=1.):
         if tR is not None and alpha != 0.5:
             print("Warning: finite tether not supported for alpha != 0.5!")
 
@@ -136,11 +138,37 @@ class ForceInference:
         if tR is None:
             def resqrt(x):
                 return ((1+np.sign(x))/2*x)**self.alpha
-        else:
+        elif tR > 0:
             def resqrt(x):
                 ind = x > 1e-10
                 ret = np.zeros_like(x)
                 ret[ind] = np.sqrt(x[ind])*(1-np.exp(-np.pi**2*tR/x[ind])) + np.pi**(3/2)*np.sqrt(tR)*scipy.special.erfc(np.pi*np.sqrt(tR/x[ind]))
+                return ret
+        else: # two-sided tether
+            tR = -tR
+            
+            def resqrt(x):
+                def half_Gamma(z): # 0.5*Γ_{-1/2}(z)
+                    return np.exp(-z)/np.sqrt(z) - np.sqrt(np.pi)*scipy.special.erfc(np.sqrt(z))
+
+                def term(n, z): # for n > 0; z = Δt / τ_L; sum has a prefactor of π*√(τ_L)
+                    return (-1)**n * n * half_Gamma((n*np.pi)**2 / z)
+                
+                ind = x > 1e-10
+                ret = np.zeros_like(x)
+                ret[ind] = np.sqrt(x[ind]) # n = 0
+
+                n = 1
+                while np.any(ind):
+                    new_term = term(n, x[ind]/tR)
+                    ret[ind] += 2*np.pi*np.sqrt(tR) * new_term
+
+                    ind[ind] &= np.abs(new_term) > 1e-10
+                    n += 1
+                    
+                    if n >= 1000:
+                        raise RuntimeError(f"Sum seems to not converge!")
+                
                 return ret
 
         tf = list( (1-self.s)*self.t[1:] + self.s*self.t[:-1] )
